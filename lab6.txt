@@ -1,0 +1,296 @@
+library(limma)
+library(ggplot2)
+library(edgeR)
+library(DESeq2)
+
+
+count_matrix = read.table('C:\\Users\\marce\\hakowanie\\programming_R\\bioconductor\\lab6\\RNAcounts_basic.txt')
+count_matrix
+
+
+count_metrices <- lapply(seq(3, 13, by = 2), function(i) {
+  
+  cols <- c(colnames(count_matrix)[1],  colnames(count_matrix)[i],
+            colnames(count_matrix)[2],  colnames(count_matrix)[i+1])
+  
+  
+  df <- data.frame( count_matrix[, 1], count_matrix[, i], 
+              count_matrix[, 2], count_matrix[, i + 1])
+  
+  rownames(df) <- rownames(count_matrix)
+  
+  df <- setNames(df, cols)
+  
+  return(df)
+})
+
+
+design <- factor(c('C', 'T', 'C', 'T'))
+design <- model.matrix(~design)
+design
+colnames(design) <- c("Intercept","T")
+
+
+results = list()
+
+it = 0
+for (matrix in count_metrices){
+  it <- it + 1
+  matrix <- data.frame(matrix)
+  
+  ### LIMMA ###
+  dge <- DGEList(counts=matrix,  group = factor(c('C', 'T', 'C', 'T')))   
+  
+  #flitorwanie
+  keep <- filterByExpr(dge)
+  #cat("Number of deleted genes:", sum(!keep), "\n")                                                    #liczba usuniętych genóW - 12801 dla 1 macierzy
+  
+  dge <-dge[keep, , keep.lib.sizes=FALSE]
+  
+  #normalizacja
+  dge <- calcNormFactors(dge)
+  
+  #ekspresja róznicowa
+  v <- voom(dge, design, plot=FALSE) 
+  fit <- lmFit(v, design)
+  fit <- eBayes(fit)
+  t_limma <- topTable(fit, coef=ncol(design), number=Inf)
+  t_limma <- t_limma[t_limma$adj.P.Val<0.01,]
+  
+  ### EDGE R ###
+  y <- estimateDisp(dge,design)
+  et <-exactTest(y)
+  t_edge <- topTags(et, n=Inf)
+  t_edge <- t_edge$table
+  adj.P.Val <- p.adjust(t_edge[,3], method='BH')
+  t_edge <- data.frame(t_edge, adj.P.Val)
+  t_edge <- t_edge[t_edge$adj.P.Val<0.01,]
+  
+  samples <- data.frame(sample=colnames(matrix), condition=factor(c('C', 'T', 'C', 'T')))
+  samples
+  dds <- DESeqDataSetFromMatrix(countData = matrix,
+                                colData = samples,
+                                design = ~ condition)
+  
+  keep <- rowSums(counts(dds)) >= 10
+  dds <- dds[keep,]
+  dds <- DESeq(dds)
+  t_deseq <- results(dds)
+  t_deseq <- t_deseq[!is.na(t_deseq$padj) & t_deseq$padj < 0.01, ]
+  t_deseq <- data.frame(t_deseq)
+  
+  
+  results[[paste('limma', it, sep = "_")]] <- t_limma
+  results[[paste('edger', it, sep = "_")]] <- t_edge
+  results[[paste('deseq', it, sep = "_")]] <- t_deseq
+  
+}
+
+
+View(results$limma_2)
+View(results$edger_2)
+View(results$deseq_2)
+
+
+
+
+library(VennDiagram)
+library(tidyverse)
+
+
+venn.diagram(
+  x =  list(rownames(results[16]$limma_6), rownames(results[17]$edger_6), rownames(results[18]$deseq_6)),
+  category.names = c("Limma" , "EdgeR" , "DESeq2"),
+  filename = './venn.png',
+  output = TRUE ,
+  imagetype="png" ,
+  height = 480 , 
+  width = 480 , 
+  resolution = 300,
+  compression = "lzw",
+  lwd = 1,
+  col=c("#440154ff", '#21908dff', '#fde725ff'),
+  fill = c(alpha("#440154ff",0.3), alpha('#21908dff',0.3), alpha('#fde725ff',0.3)),
+  cex = 0.5,
+  fontfamily = "sans",
+  cat.cex = 0.3,
+  cat.default.pos = "outer",
+  cat.pos = c(-27, 27, 135),
+  cat.dist = c(0.055, 0.055, 0.085),
+  cat.fontfamily = "sans",
+  cat.col = c("#440154ff", '#21908dff', '#fde725ff'),
+  rotation = 1
+)
+
+
+
+res_des_1 <- results[3]$deseq_1
+res_des_2 <- results[6]$deseq_2
+res_des_3 <- results[9]$deseq_3
+res_des_4 <- results[12]$deseq_4
+res_des_5 <- results[15]$deseq_5
+
+row_names_1 <- rownames(res_des_1)
+row_names_2 <- rownames(res_des_2)
+row_names_3 <- rownames(res_des_3)
+row_names_4 <- rownames(res_des_4)
+row_names_5 <- rownames(res_des_5)
+
+common_row_names <- Reduce(intersect, list(row_names_1, row_names_2, row_names_3, row_names_4, row_names_5))
+
+res_des_1 <- res_des_1[common_row_names, ]
+res_des_2 <- res_des_2[common_row_names, ]
+res_des_3 <- res_des_3[common_row_names, ]
+res_des_4 <- res_des_4[common_row_names, ]
+res_des_5 <- res_des_5[common_row_names, ]
+
+common_matrix <- cbind(res_des_1[, 'baseMean'], res_des_2[, 'baseMean'], res_des_3[, 'baseMean'], res_des_4[, 'baseMean'], res_des_5[, 'baseMean'])
+
+rownames(common_matrix) <- common_row_names
+colnames(common_matrix)<- (c('4PTX', '8PTX', '16PTX', '32PTX', '64PTX'))
+
+normalized_matrix <- scale(common_matrix, center = FALSE, scale = apply(common_matrix, 2, max) - apply(common_matrix, 2, min))
+
+
+heatmap.2(common_matrix, col = heat.colors(20), scale = "row",
+          main = "Heatmap of Deseq2",
+          xlab = "Samples", ylab = "Genes",
+          margins = c(7, 7),
+          trace = "none",  # Turn off trace lines
+          density.info = "none",  # Turn off density plot
+          dendrogram = "none",  # Turn off dendrogram
+          key = TRUE, keysize = 1.5, key.title = "Normalised expression Level",
+          key.xlab = "Color Key",
+          Colv = FALSE,)
+
+# ### LIMMA ###
+# dge <- DGEList(counts=data.frame(count_metrices[1]),  group = factor(c('C', 'T', 'C', 'T')))   
+# dge
+# 
+# 
+# #flitorwanie
+# keep <- filterByExpr(dge)
+# cat("Number of deleted genes:", sum(!keep), "\n")                                                    #liczba usuniętych genóW - 12801 dla 1 macierzy
+# 
+# dge <-dge[keep, , keep.lib.sizes=FALSE]
+#   
+# 
+# #normalizacja
+# dge <- calcNormFactors(dge)
+# 
+# 
+# #ekspresja róznicowa
+# v <- voom(dge, design, plot=TRUE) 
+# fit <- lmFit(v, design)
+# fit <- eBayes(fit)
+# t_limma <- topTable(fit, coef=ncol(design), number=Inf)
+# t_limma <- t_limma[t_limma$adj.P.Val<0.01,]
+
+
+### EDGE R ###
+# y <- estimateDisp(dge,design)
+# et <-exactTest(y)
+# t_edge <- topTags(et, n=Inf)
+# t_edge <- t_edge$table
+# adj.P.Val <- p.adjust(t_edge[,3], method='BH')
+# t_edge <- data.frame(t_edge, adj.P.Val)
+# t_edge <- t_edge[t_edge$adj.P.Val<0.01,]
+
+
+### DESEQ2 ###
+# samples <- data.frame(sample=colnames(data.frame(count_metrices[2])), condition=factor(c('C', 'T', 'C', 'T')))
+# samples
+# dds <- DESeqDataSetFromMatrix(countData = data.frame(count_metrices[2]),
+#                               colData = samples,
+#                               design = ~ condition)
+# 
+# keep <- rowSums(counts(dds)) >= 10
+# dds <- dds[keep,]
+# dds <- DESeq(dds)
+# 
+# 
+# t_deseq <- results(dds)
+# t_deseq <- t_deseq[!is.na(t_deseq$padj) & t_deseq$padj < 0.01, ]
+# t_deseq <- data.frame(t_deseq)
+# 
+# sum(t_deseq$padj < 0.01, na.rm=TRUE)
+
+
+
+
+###PCA próbek ###
+
+controls <- rep("C", times=2)
+treated <- rep("T", times= 12)
+design <- factor(c(controls, treated))
+design <- model.matrix(~design)
+design
+colnames(design) <- c("Intercept","T")
+
+
+samples <- data.frame(sample=colnames(count_matrix), condition= factor(c(controls, treated)))
+samples
+dds <- DESeqDataSetFromMatrix(countData = count_matrix,
+                              colData = samples,
+                              design = ~ condition)
+
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- DESeq(dds)
+
+
+rld = rlog(dds)
+ret = plotPCA(rld, ntop = 200, returnData=TRUE)
+
+
+legend_order <- c("A2780a", "A2780b", "a4PTXa", "a4PTXb", "a8PTXa", "a8PTXb", "a16PTXa", "a16PTXb", "a32PTXa", "a32PTXb", "a64PTXa", "a64PTXb", "a128PTXa", "a128PTXb")
+
+ggplot(ret, aes(x = PC1, y = PC2, color = name)) +
+  geom_point(size = 3) +
+  scale_color_discrete(limits = legend_order) +
+  labs(title = "PCA Plot", x = "PC1", y = "PC2")
+
+
+
+### PCA GENÓW ###
+legend_order <- c("A2780a", "A2780b", "a8PTXa", "a8PTXb")
+
+samples <- data.frame(sample=colnames(data.frame(count_metrices[2])), condition=factor(c('C', 'T', 'C', 'T')))
+samples
+dds <- DESeqDataSetFromMatrix(countData = data.frame(count_metrices[2]),
+                              colData = samples,
+                              design = ~ condition)
+
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dds <- DESeq(dds)
+
+data_rld <- assay(rld)
+
+v_log = matrix(nrow = length(data_rld[,1]), ncol = 1)
+rownames(v_log) <- c(rownames(data_rld))
+
+for (i in 1:length(data_rld[,1]))
+{
+  v_log[i] = var(data_rld[i,])
+}
+
+v_log_sort <- as.matrix(v_log[order(v_log,decreasing=TRUE),])
+
+genes_with_var_log <- rownames(v_log_sort)
+genes_with_var_log <- genes_with_var_log[1:200]
+
+d1_normT_var_log <- data_rld[genes_with_var_log,]
+pca <- prcomp(d1_normT_var_log)
+project.pca.proportionvariances <- ((pca$sdev^2) / (sum(pca$sdev^2)))*100
+
+
+auto_colors <- rainbow(length(legend_order))
+
+# Plot using automatic colors
+plot(x = pca$x[, 1], y = pca$x[, 2], col = auto_colors, pch = 16, main = "Genes with high variance, top 200",
+     xlab = paste("PC1, ", round(project.pca.proportionvariances[1], 2), "%"),
+     ylab = paste("PC2, ", round(project.pca.proportionvariances[2], 2), "%"))
+
+# Add legend with automatic colors
+legend(x = "topright", legend_order, fill = auto_colors, pch = 16, cex = 0.6, bg = "white")
