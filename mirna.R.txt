@@ -1,0 +1,350 @@
+library(limma)
+library(ggplot2)
+library(edgeR)
+library(dplyr)
+library(edgeR)
+library(Biobase)
+
+###  ODCZYT I FILTROWANIE DANYCH  ###
+micro = read.table('C:\\Users\\marce\\Desktop\\biurowe 5\\Analiza danych wysokoprzepust\\z5\\miHomo.txt')
+dim(micro)
+
+n_samples <- dim(micro)[2]
+row_sums <- apply(micro, 1, sum)
+avgs <- row_sums / n_samples
+
+micro <- micro[avgs >= 3.0,]
+dim(micro)                   ###----> brak zmian, dane przefiltrowane na wstępie
+micro
+
+
+
+pData=read.table("C:\\Users\\marce\\Desktop\\biurowe 5\\Analiza danych wysokoprzepust\\z5\\phenoData.txt",row.names=1, 
+                 header=TRUE, sep="\t") 
+
+pData[pData$subtype %in% c('normalBM', 'normalPB'), 'subtype'] = 'CTRL'
+
+pData$age1 <- case_when(
+  pData$age1 == 'CTRL' ~ 'CTRL',
+  pData$age1 < 40 ~ 'young',
+  pData$age1 >= 40 & pData$age1 < 59 ~ 'middle',
+  pData$age1 >= 59 ~ 'old',
+  TRUE ~ as.character(pData$age1)  # Keep the original value for other cases
+)
+pData
+
+metaData <- data.frame(labelDescription= 
+                         c("Type_of_cancer","Mutation_type", "Sex", "Age"),row.names= 
+                         c("type", "virus", "timepoint", "individual")) 
+metaData
+
+
+phenoData <- new("AnnotatedDataFrame",data=pData, varMetadata=metaData)
+phenoData
+
+
+
+### DGE ###
+Homo_eSet <- ExpressionSet(assayData = as.matrix(micro), phenoData = phenoData) 
+Counts1 <- exprs(Homo_eSet) 
+y1=DGEList(counts=Counts1, genes=rownames(Counts1))
+
+### Design i contrast metrices ###
+Group <- factor(Homo_eSet$type, levels=c("CTRL","AML"))
+design <- model.matrix(~Group) 
+colnames(design) <- c("CTRL","AMLvsCTRL")
+design
+
+
+### Normalizacja ###
+y1 <- calcNormFactors(y1) 
+v1 <- voom(y1,design,plot=TRUE) 
+plotMDS(v1,top=50,labels=substring(types,1,1), col=ifelse(types=="AML", "blue","red"), gene.selection= "common") 
+
+
+### Wyniki ###
+fit1 = lmFit(v1,design) 
+fit1 <- eBayes(fit1) 
+top = topTable(fit1,coef="AMLvsCTRL",n=Inf) 
+top1 = top[top$adj.P.Val<=0.01,] 
+top1
+
+results <- decideTests(fit1, p.value=0.01)
+summary(results)
+volcanoplot(fit1, coef=2)
+
+
+
+
+#porównanie typów białaczki M1 i M2
+y1=DGEList(counts=Counts1, genes=rownames(Counts1))
+
+subtypes <- Homo_eSet$subtype
+treated_idx = which(subtypes!='CTRL')
+y1 <- y1[, treated_idx]
+subtypes <- subtypes[subtypes!='CTRL']
+
+
+Group <- factor(subtypes, levels=c("M1","M2"))
+design <- model.matrix(~Group) 
+colnames(design) <- c("M1","M2vsM1") 
+design
+
+
+y1 <- calcNormFactors(y1) 
+v1 <- voom(y1,design,plot=TRUE) 
+plotMDS(v1,top=50,labels=subtypes, col=ifelse(subtypes=="M1", "blue","red"), gene.selection= "common") 
+
+
+### Wyniki ###
+fit1 = lmFit(v1,design) 
+fit1 <- eBayes(fit1) 
+top = topTable(fit1,coef=2,n=Inf) 
+top
+top1 = top[top$adj.P.Val<=0.05,] 
+top1
+
+
+results <- decideTests(fit1, p.value=0.01)
+summary(results)
+volcanoplot(fit1, coef=2)
+
+
+
+
+
+#porównanie typu białaczki M1 i kontroli
+y1=DGEList(counts=Counts1, genes=rownames(Counts1))
+
+
+subtypes <- Homo_eSet$subtype
+m1 = which(subtypes!='M2')
+y1 <- y1[, m1]
+subtypes <- subtypes[subtypes!='M2']
+
+Group <- factor(subtypes, levels=c("CTRL","M1"))
+design <- model.matrix(~Group) 
+colnames(design) <- c("CTRL","M1vsCTRL") 
+design
+
+y1 <- calcNormFactors(y1) 
+v1 <- voom(y1,design,plot=TRUE) 
+plotMDS(v1,top=50,labels=subtypes, col=ifelse(subtypes=="M1", "blue","red"), gene.selection= "common") 
+
+
+### Wyniki ###
+fit1 = lmFit(v1,design) 
+fit1 <- eBayes(fit1) 
+top = topTable(fit1,coef="M1vsCTRL",n=Inf) 
+top1 = top[top$adj.P.Val<=0.01,] 
+top1
+
+
+results <- decideTests(fit1, p.value=0.01)
+summary(results)
+volcanoplot(fit1, coef=2)
+
+
+
+#porównanie typu białaczki M2 i kontroli
+y1=DGEList(counts=Counts1, genes=rownames(Counts1))
+
+subtypes <- Homo_eSet$subtype
+m2 = which(subtypes!='M1')
+y1 <- y1[, m2]
+subtypes <- subtypes[subtypes!='M1']
+
+Group <- factor(subtypes, levels=c("CTRL","M2"))
+design <- model.matrix(~Group) 
+colnames(design) <- c("CTRL","M2vsCTRL") 
+design
+
+y1 <- calcNormFactors(y1) 
+v1 <- voom(y1,design,plot=TRUE) 
+plotMDS(v1,top=50,labels=subtypes, col=ifelse(subtypes=="M2", "blue","red"), gene.selection= "common") 
+
+### Wyniki ###
+fit1 = lmFit(v1,design) 
+fit1 <- eBayes(fit1) 
+top = topTable(fit1,coef="M2vsCTRL",n=Inf) 
+top1 = top[top$adj.P.Val<=0.01,] 
+top1
+
+results <- decideTests(fit1, p.value=0.01)
+summary(results)
+volcanoplot(fit1, coef="M2vsCTRL")
+
+
+
+
+#porównanie F i M
+y1=DGEList(counts=Counts1, genes=rownames(Counts1))
+
+sexs <- Homo_eSet$sex
+mf = which(sexs!='CTRL')
+y1 <- y1[, mf]
+sexs <- sexs[sexs!='CTRL']
+
+Group <- factor(sexs, levels=c("F","M"))
+design <- model.matrix(~Group) 
+colnames(design) <- c("F","MvsF") 
+design
+
+y1 <- calcNormFactors(y1) 
+v1 <- voom(y1,design,plot=TRUE) 
+plotMDS(v1,top=50,labels=sexs, col=ifelse(sexs=="M", "blue","red"), gene.selection= "common") 
+
+
+### Wyniki ###
+fit1 = lmFit(v1,design) 
+fit1 <- eBayes(fit1) 
+top = topTable(fit1,coef=2,n=Inf) 
+top1 = top[top$adj.P.Val<=0.05,] 
+top1
+
+results <- decideTests(fit1, p.value=0.01)
+summary(results)
+volcanoplot(fit1, coef=2)
+
+
+#porównanie M i kontrola
+y1=DGEList(counts=Counts1, genes=rownames(Counts1))
+
+sexs <- Homo_eSet$sex
+mf = which(sexs!='F')
+y1 <- y1[, mf]
+sexs <- sexs[sexs!='F']
+
+Group <- factor(sexs, levels=c("CTRL","M"))
+design <- model.matrix(~Group) 
+colnames(design) <- c("CTRL","MvsCTRL") 
+design
+
+y1 <- calcNormFactors(y1) 
+v1 <- voom(y1,design,plot=TRUE) 
+plotMDS(v1,top=50,labels=sexs, col=ifelse(sexs=="M", "blue","red"), gene.selection= "common") 
+
+
+### Wyniki ###
+fit1 = lmFit(v1,design) 
+fit1 <- eBayes(fit1) 
+top = topTable(fit1,coef=2,n=Inf) 
+top1 = top[top$adj.P.Val<=0.01,] 
+top1
+
+results <- decideTests(fit1)
+summary(results)
+volcanoplot(fit1, coef=2)
+
+
+#porównanie F i kontrola
+y1=DGEList(counts=Counts1, genes=rownames(Counts1))
+
+sexs <- Homo_eSet$sex
+mf = which(sexs!='M')
+y1 <- y1[, mf]
+sexs <- sexs[sexs!='M']
+
+Group <- factor(sexs, levels=c("CTRL","F"))
+design <- model.matrix(~Group) 
+colnames(design) <- c("CTRL","FvsCTRL") 
+design
+
+y1 <- calcNormFactors(y1) 
+v1 <- voom(y1,design,plot=TRUE) 
+plotMDS(v1,top=50,labels=sexs, col=ifelse(sexs=="F", "blue","red"), gene.selection= "common") 
+
+
+### Wyniki ###
+fit1 = lmFit(v1,design) 
+fit1 <- eBayes(fit1) 
+top = topTable(fit1,coef=2,n=Inf) 
+top1 = top[top$adj.P.Val<=0.01,] 
+top1
+
+results <- decideTests(fit1, p.value=0.01)
+summary(results)
+volcanoplot(fit1, coef=2)
+
+
+
+### wiek wszyscy ###
+y1=DGEList(counts=Counts1, genes=rownames(Counts1))
+
+ages <- Homo_eSet$age1
+ag = which(ages!='CTRL')
+y1 <- y1[, ag]
+ages <- ages[ages!='CTRL']
+
+Group <- factor(ages, levels=c("young","middle","old"))
+design <- model.matrix(~0 + Group) 
+colnames(design) <- c("young","middle", "old") 
+design
+
+colors <- ifelse(ages == "young", "blue", ifelse(ages == "middle", "green", "red"))
+
+y1 <- calcNormFactors(y1) 
+v1 <- voom(y1,design,plot=TRUE) 
+plotMDS(v1,top=50,labels=ages, col=colors, gene.selection= "common") 
+
+fit1 = lmFit(v1,design) 
+contrast.matrix <- makeContrasts(young-middle, young-old, middle-old,levels=design)
+fit2 <- contrasts.fit(fit1, contrast.matrix)
+fit2 <- eBayes(fit2) 
+
+
+#porównanie young-middle
+top = topTable(fit2, coef=1, n=Inf)
+top1 = top[top$adj.P.Val<=0.05,] 
+top1
+
+#porównanie old-middle
+top = topTable(fit2, coef=2, n=Inf)
+top1 = top[top$adj.P.Val<=0.05,] 
+top1
+
+#porównanie middle-old
+top = topTable(fit2, coef=3, n=Inf)
+top1 = top[top$adj.P.Val<=0.05,] 
+top1
+
+
+#wszystkie
+top = topTable(fit2, number=Inf)
+top1 = top[top$adj.P.Val<=0.05,] 
+top1
+
+
+results <- decideTests(fit2, p.value=0.01)
+summary(results)
+
+
+
+#wiek i konrola
+y1=DGEList(counts=Counts1, genes=rownames(Counts1))
+
+ages <- Homo_eSet$age1
+mf = which(ages!='young' & ages!='middle')
+y1 <- y1[, mf]
+ages <- ages[mf]
+
+Group <- factor(ages, levels=c("CTRL","old"))
+design <- model.matrix(~Group) 
+colnames(design) <- c("CTRL","oldvsCTRL") 
+design
+
+y1 <- calcNormFactors(y1) 
+v1 <- voom(y1,design,plot=TRUE) 
+plotMDS(v1,top=50,labels=ages, col=ifelse(ages=="old", "blue","red"), gene.selection= "common") 
+
+
+### Wyniki ###
+fit1 = lmFit(v1,design) 
+fit1 <- eBayes(fit1) 
+top = topTable(fit1,coef=2,n=Inf) 
+top1 = top[top$adj.P.Val<=0.05,] 
+top1
+
+results <- decideTests(fit1, p.value=0.05)
+summary(results)
+volcanoplot(fit1, coef=2)

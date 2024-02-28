@@ -1,0 +1,57 @@
+library(limma)
+
+
+###ZAD1###
+targets <- readTargets("C:/Users/marce/Desktop/biurowe 5/Analiza danych wysokoprzepust/z3/files/targets_agilent_Cd.txt")
+targets
+
+RG <- read.maimages(targets, source="genepix.custom", path="C:/Users/marce/Desktop/biurowe 5/Analiza danych wysokoprzepust/z3/files/")
+RG$genes=readGAL("C:/Users/marce/Desktop/biurowe 5/Analiza danych wysokoprzepust/z3/files/gal_do_anotacji2.gal")
+RG$printer <- getLayout(RG$genes)
+RG
+
+RG <- backgroundCorrect(RG, method="normexp", offset=50)
+
+MA <- normalizeWithinArrays(RG)
+plotMD(MA[, 2])
+
+RG
+plotPrintTipLoess(RG[,2])
+
+
+###ZAD2###
+design <- modelMatrix(targets, ref="Control")
+design
+
+fit <- lmFit(MA, design = design)
+fit <- eBayes(fit)
+typeof(fit)
+#lista
+t <- topTable(fit, number=20)
+#adjusted p-value -> jeśli niskie to różnicowa ekspresja
+
+
+###ZAD3
+t <- topTable(fit, number=45220) #that is number of all genes
+t_p05 <- t[t['P.Value'] < 0.05,]
+t_p01 <- t[t['P.Value'] < 0.01,]
+
+
+results <- decideTests(fit)
+summary(results)
+vennDiagram(results)
+
+volcanoplot(fit)
+#najbardziej wysunięte do góry po bokach
+
+
+#zad4
+tp <- topTable(fit, coef=1, number=Inf, adjust="BH")
+top5 <- tp[tp['adj.P.Val'] < 0.05,]
+top1 <- tp[tp['adj.P.Val'] < 0.01,]
+
+top1_up <- top1[top1['logFC'] > 0,]
+top1_down <- top1[top1['logFC'] < 0,]
+write.csv(top1_up, 'up.csv')
+write.csv(top1_down, 'down.csv')
+
